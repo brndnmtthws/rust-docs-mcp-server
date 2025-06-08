@@ -16,20 +16,21 @@ lack knowledge of the latest APIs, leading to incorrect or outdated code
 suggestions.
 
 This MCP server addresses this challenge by providing a focused, up-to-date
-knowledge source for a specific Rust crate. By running an instance of this
-server for a crate (e.g., `serde`, `tokio`, `reqwest`), you give your LLM coding
-assistant a tool (`query_rust_docs`) it can use _before_ writing code related to
-that crate.
+knowledge source for Rust crates. By running an instance of this server, you give 
+your LLM coding assistant tools to access current Rust documentation:
 
-When instructed to use this tool, the LLM can ask specific questions about the
-crate's API or usage and receive answers derived directly from the _current_
-documentation. This significantly improves the accuracy and relevance of the
-generated code, reducing the need for manual correction and speeding up
-development.
+1. **`query_rust_docs`**: Ask questions about the crate the server was initialized 
+   with, getting answers derived directly from the _current_ documentation.
+2. **`fetch_crate_docs`**: Dynamically load documentation for any other Rust crate 
+   during the session, without needing to restart or configure additional servers.
 
-Multiple instances of this server can be run concurrently, allowing the LLM
-assistant to access documentation for several different crates during a coding
-session.
+This flexibility means you can start a single server instance (e.g., for your main 
+project crate) and then let the LLM fetch documentation for dependencies as needed. 
+For example, if working on a web service using `axum`, the LLM can dynamically fetch 
+docs for `tokio`, `serde`, `tower`, and other dependencies when it needs them.
+
+All fetched documentation is cached locally, so subsequent uses of the same crate 
+version are instantaneous and don't incur additional API costs.
 
 This server fetches the documentation for a specified Rust crate, generates
 embeddings for the content, and provides an MCP tool to answer questions about
@@ -38,7 +39,9 @@ the crate based on the documentation context.
 ## Features
 
 - **Targeted Documentation:** Focuses on a single Rust crate per server
-  instance.
+  instance, with the ability to dynamically fetch documentation for additional crates.
+- **Dynamic Crate Loading:** New `fetch_crate_docs` tool allows the model to load
+  documentation for any Rust crate on-demand during a session.
 - **Feature Support:** Allows specifying required crate features for
   documentation generation.
 - **Semantic Search:** Uses OpenAI's `text-embedding-3-small` model to find the
@@ -187,6 +190,51 @@ input/output (stdio). It exposes the following:
     }
     ```
 
+- **Tool: `fetch_crate_docs`**
+  - **Description:** Fetch and cache documentation for any Rust crate. This allows
+    the model to dynamically load documentation for additional crates during a session
+    without restarting the server.
+  - **Input Schema:**
+    ```json
+    {
+      "type": "object",
+      "properties": {
+        "crate_name": {
+          "type": "string",
+          "description": "The name of the Rust crate to fetch documentation for."
+        },
+        "version": {
+          "type": "string",
+          "description": "The version requirement for the crate (e.g., '^1.0', '>=0.5,<2.0'). Defaults to '*' (latest)."
+        },
+        "features": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Features to enable when generating documentation."
+        }
+      },
+      "required": ["crate_name"]
+    }
+    ```
+  - **Output:** A JSON response containing information about the loaded documentation
+    including whether it was loaded from cache, number of documents, and any costs incurred.
+  - **Example MCP Call:**
+    ```json
+    {
+      "jsonrpc": "2.0",
+      "method": "callTool",
+      "params": {
+        "tool_name": "fetch_crate_docs",
+        "arguments": {
+          "crate_name": "serde",
+          "version": "^1.0",
+          "features": ["derive"]
+        }
+      },
+      "id": 2
+    }
+    ```
+
 - **Resource: `crate://<crate_name>`**
   - **Description:** Provides the name of the Rust crate this server instance is
     configured for.
@@ -195,6 +243,32 @@ input/output (stdio). It exposes the following:
 
 - **Logging:** The server sends informational logs (startup messages, query
   processing steps) back to the MCP client via `logging/message` notifications.
+
+### Usage Example: Dynamic Documentation Loading
+
+With the new `fetch_crate_docs` tool, you can start with documentation for one crate
+and dynamically load others as needed. Here's an example workflow:
+
+1. Start the server with your main project crate:
+   ```bash
+   rustdocs_mcp_server "axum@0.7"
+   ```
+
+2. In your AI assistant, you can now:
+   - Ask questions about axum using `query_rust_docs`
+   - Load documentation for dependencies dynamically:
+     - "Load the documentation for tokio version 1.0"
+     - "Fetch docs for serde with the derive feature"
+     - "Get the latest tower documentation"
+
+3. The server will fetch and cache each crate's documentation on first request,
+   then you can query them as if they were loaded at startup.
+
+This approach is especially useful when:
+- You're exploring a new crate ecosystem
+- Working with many small dependencies
+- Unsure which crates you'll need documentation for
+- Want to minimize initial startup time
 
 ### Example Client Configuration (Roo Code)
 
@@ -332,6 +406,14 @@ Here's an example configuring servers for `serde` and `async-stripe`:
    - The LLM is prompted to answer the question based _only_ on the provided
      context.
    - Returns the LLM's response to the MCP client.
+10. **Dynamic Loading (`fetch_crate_docs` tool):**
+    - Accepts crate name, optional version requirement, and optional features.
+    - Checks cache for existing documentation with matching parameters.
+    - If not cached, performs steps 3-6 above for the requested crate.
+    - Returns detailed information about the operation including document count,
+      cache status, and embedding generation costs (if any).
+    - The loaded documentation becomes available for future queries without
+      requiring server restart.
 
 ## License
 

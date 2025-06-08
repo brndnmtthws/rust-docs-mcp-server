@@ -40,6 +40,7 @@
             src = craneLib.cleanCargoSource ./.;
             buildInputs = with pkgs; [
               openssl
+              curl
             ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
               # Additional darwin specific inputs
               pkgs.darwin.apple_sdk.frameworks.Security
@@ -91,7 +92,7 @@
             rustVersion = "stable";
             # Example configuration:
             # withTools = [ ];  # Will be prefixed with cargo-
-            extraPackages = [ pkgs.openssl pkgs.openssl.dev pkgs.pkg-config ]; # Add openssl libs, dev libs, and pkg-config
+            extraPackages = [ pkgs.openssl pkgs.openssl.dev pkgs.pkg-config pkgs.curl pkgs.curl.dev ]; # Add openssl libs, dev libs, pkg-config, and curl
             # ide.type = "none";
           };
 
@@ -129,8 +130,11 @@
               export OPENSSL_DIR="${pkgs.openssl.out}"
               export OPENSSL_LIB_DIR="${pkgs.openssl.out}/lib"
               export OPENSSL_INCLUDE_DIR="${pkgs.openssl.dev}/include"
-              # Ensure pkg-config can find the openssl .pc file
-              export PKG_CONFIG_PATH="${pkgs.openssl.dev}/lib/pkgconfig:${pkgs.pkg-config}/lib/pkgconfig:$PKG_CONFIG_PATH"
+              # Export paths for curl
+              export CURL_LIB_DIR="${pkgs.curl.out}/lib"
+              export CURL_INCLUDE_DIR="${pkgs.curl.dev}/include"
+              # Ensure pkg-config can find the openssl and curl .pc files
+              export PKG_CONFIG_PATH="${pkgs.openssl.dev}/lib/pkgconfig:${pkgs.curl.dev}/lib/pkgconfig:${pkgs.pkg-config}/lib/pkgconfig:$PKG_CONFIG_PATH"
               # Debug: List contents of OpenSSL lib directory to verify
               echo "OpenSSL lib directory contents:"
               ls -la ${pkgs.openssl.out}/lib || echo "Failed to list OpenSSL lib directory"
